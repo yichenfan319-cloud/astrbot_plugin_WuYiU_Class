@@ -1,0 +1,22 @@
+{
+  "username": {
+    "type": "string",
+    "description": "武夷学院教务系统学号",
+    "hint": "例如：123456789",
+    "required": true
+  },
+  "password": {
+    "type": "string",
+    "description": "教务系统登录密码",
+    "hint": "你的登录密码",
+    "required": true,
+    "secret": true
+  },
+  "browser_path": {
+    "type": "string",
+    "description": "Chromium浏览器路径（服务器部署必填）",
+    "hint": "Linux服务器填/usr/bin/chromium，Windows留空自动检测",
+    "required": false,
+    "default": ""
+  }
+}

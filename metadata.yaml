@@ -1,6 +1,15 @@
-name: helloworld # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
-display_name: helloworld # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
-desc: AstrBot 插件示例。 # 插件简短描述
-version: v1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: Soulter # 作者
-repo: https://github.com/Soulter/helloworld # 插件的仓库地址
+name: 武夷学院课表查询
+desc: 武夷学院教务系统自动查课表插件
+help: |
+  自动登录武夷学院教务系统，支持查询今天、明天、后天、本周、下周及指定周课表。
+  使用前请在插件配置中填写学号和密码。
+  指令列表：
+  • 更新课表 - 重新获取本周课表数据
+  • 今天有什么课 - 查看今日课程
+  • 明天课表 / 后天课表 - 查看近期课程（自动处理跨周）
+  • 本周课表 - 查看本周完整课表
+  • 下周课表 - 查看下周课表
+  • 第{X}周课表 - 查看指定周（X为1-20）
+author: 一夜星辰128
+version: 1.0.0
+repository: https://github.com/yichenfan319/astrbot_plugin_WuYiU_Class
