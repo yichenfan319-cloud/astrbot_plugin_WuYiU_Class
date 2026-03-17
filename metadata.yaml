@@ -11,5 +11,5 @@ help: |
   • 下周课表 - 查看下周课表
   • 第{X}周课表 - 查看指定周（X为1-20）
 author: 一夜星辰128
-version: 1.0.0
+version: 1.0.1
 repository: https://github.com/yichenfan319/astrbot_plugin_WuYiU_Class
