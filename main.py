@@ -2,11 +2,12 @@ import os
 import re
 import time
 import json
+import asyncio
 import platform
 import traceback
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
-from typing import List, Optional, Union, Dict
+from typing import List, Optional, Union
 
 # ==================== AstrBot 导入（带容错） ====================
 try:
@@ -503,44 +504,86 @@ def format_week_by_day(title: str, courses: List[Course]) -> str:
     
     return "\n".join(lines)
 
-# ==================== AstrBot 插件主类（官方标准写法） ====================
+# ==================== AstrBot 插件主类 ====================
 class WuyiKebiaoPlugin(Star):
-    def __init__(self, context: Context, config: dict = None):
+    def __init__(self, context: Context):
         super().__init__(context)
         
-        # 官方标准写法：保存整个 config 对象（AstrBotConfig 继承自 Dict）
-        self.config = config or {}
-        self.data_dir = ""
-        self.json_file = ""
-        self.courses: List[Course] = []
+        self.username = "20251481201"
+        self.password = "HorizonUI128.com"
+        self.browser_path = "/usr/bin/chromium"
         
-        # 初始化数据目录
         if hasattr(context, 'data_path'):
             self.data_dir = context.data_path
         else:
             self.data_dir = os.path.join(os.path.dirname(__file__), "data")
-        
         os.makedirs(self.data_dir, exist_ok=True)
+        
         self.json_file = os.path.join(self.data_dir, "courses.json")
+        self.courses: List[Course] = []
         self._load_cache()
         
-        # 调试信息
-        if self.config:
-            logger.info(f"[武夷课表] 配置已加载: {list(self.config.keys())}")
-            # 检查是否有账号（脱敏显示）
-            if self.config.get("username"):
-                logger.info(f"[武夷课表] 账号状态: 已配置 ({str(self.config.get('username'))[:4]}****)")
-            else:
-                logger.info("[武夷课表] 账号状态: 未配置")
-        else:
-            logger.warning("[武夷课表] 配置为空，请在 WebUI 插件配置中设置")
+        # 启动定时任务：每天早上6点自动更新
+        if ASTRBOT_AVAILABLE:
+            try:
+                self._update_task = asyncio.create_task(self._daily_update_task())
+                logger.info("[定时任务] 已启动每日6点自动更新课表")
+            except Exception as e:
+                logger.error(f"[定时任务] 启动失败: {e}")
+        
+        logger.info(f"[插件] 武夷学院课表插件已加载")
+        logger.info(f"[插件] 数据目录: {self.data_dir}")
     
-    def _get_credentials(self):
-        """获取账号密码（支持环境变量覆盖配置）"""
-        username = os.environ.get("WUYI_USERNAME") or self.config.get("username", "")
-        password = os.environ.get("WUYI_PASSWORD") or self.config.get("password", "")
-        browser_path = os.environ.get("BROWSER_PATH") or self.config.get("browser_path", "/usr/bin/chromium")
-        return username.strip(), password.strip(), browser_path.strip() if browser_path else "/usr/bin/chromium"
+    async def _daily_update_task(self):
+        """后台定时任务：每天早上6点自动更新课表缓存"""
+        while True:
+            try:
+                now = datetime.now()
+                # 计算下一个早上6点
+                target = now.replace(hour=6, minute=0, second=0, microsecond=0)
+                if now >= target:
+                    # 如果已经过了6点，等到明天6点
+                    target += timedelta(days=1)
+                
+                wait_seconds = (target - now).total_seconds()
+                logger.info(f"[定时任务] 下次更新: {target.strftime('%Y-%m-%d %H:%M:%S')}，等待 {wait_seconds/3600:.1f} 小时")
+                
+                await asyncio.sleep(wait_seconds)
+                
+                # 到达6点，执行更新
+                logger.info("[定时任务] 开始自动更新课表...")
+                await self._do_auto_update()
+                
+            except Exception as e:
+                logger.error(f"[定时任务] 异常: {e}")
+                traceback.print_exc()
+                # 出错后等待10分钟再重试，避免死循环
+                await asyncio.sleep(600)
+    
+    async def _do_auto_update(self):
+        """执行自动更新（静默，不发送消息）"""
+        fetcher = None
+        try:
+            fetcher = CourseFetcher(
+                self.username, 
+                self.password, 
+                headless=True,
+                browser_path=self.browser_path
+            )
+            courses = fetcher.fetch_timetable(week=None)
+            
+            if courses:
+                self.courses = courses
+                self._save_cache(courses)
+                logger.info(f"[定时任务] 课表自动更新成功，共 {len(courses)} 门课程")
+            else:
+                logger.warning("[定时任务] 自动更新失败，未获取到课程数据")
+        except Exception as e:
+            logger.error(f"[定时任务] 自动更新异常: {e}")
+            traceback.print_exc()
+        finally:
+            if fetcher:
+                fetcher.close()
     
     def _load_cache(self):
         if os.path.exists(self.json_file):
@@ -551,7 +594,6 @@ class WuyiKebiaoPlugin(Star):
                 logger.info(f"[缓存] 已加载 {len(self.courses)} 门课程")
             except Exception as e:
                 logger.error(f"[缓存] 加载失败: {e}")
-                self.courses = []
     
     def _save_cache(self, courses: List[Course]):
         try:
@@ -576,21 +618,15 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("更新课表")
     async def update_kebiao(self, event: AstrMessageEvent):
-        username, password, browser_path = self._get_credentials()
-        
-        if not username or not password:
-            yield event.plain_result("❌ 未配置学号或密码，请在 AstrBot WebUI → 插件配置 → 武夷课表 中设置")
-            return
-        
         yield event.plain_result("⏳ 正在登录教务系统获取当前周课表...")
         
         fetcher = None
         try:
             fetcher = CourseFetcher(
-                username, 
-                password, 
+                self.username, 
+                self.password, 
                 headless=True,
-                browser_path=browser_path
+                browser_path=self.browser_path
             )
             courses = fetcher.fetch_timetable(week=None)
             
@@ -602,7 +638,7 @@ class WuyiKebiaoPlugin(Star):
             self._save_cache(courses)
             
             result = format_week_by_day("当前周", courses)
-            yield event.plain_result(f"✅ 更新成功！\n{result}\n\n💡 提示：发送\"明天课表\"查看明日安排")
+            yield event.plain_result(f"✅ 更新成功！\n{result}\n\n💡 提示：发送\"今天课表\"或\"明天课表\"查看课程安排")
             
         except Exception as e:
             logger.error(f"[命令] 更新课表异常: {e}")
@@ -613,21 +649,15 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("下周课表")
     async def next_week_courses(self, event: AstrMessageEvent):
-        username, password, browser_path = self._get_credentials()
-        
-        if not username or not password:
-            yield event.plain_result("❌ 未配置学号或密码，请在插件配置中设置")
-            return
-            
         yield event.plain_result("⏳ 正在查询下周课表...")
         
         fetcher = None
         try:
             fetcher = CourseFetcher(
-                username,
-                password,
+                self.username,
+                self.password,
                 headless=True,
-                browser_path=browser_path
+                browser_path=self.browser_path
             )
             courses = fetcher.fetch_timetable(week="next")
             
@@ -647,12 +677,6 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("第 {week} 周课表")
     async def specific_week(self, event: AstrMessageEvent, week: str):
-        username, password, browser_path = self._get_credentials()
-        
-        if not username or not password:
-            yield event.plain_result("❌ 未配置学号或密码，请在插件配置中设置")
-            return
-            
         try:
             week_num = int(week)
             if week_num < 1 or week_num > 20:
@@ -667,10 +691,10 @@ class WuyiKebiaoPlugin(Star):
         fetcher = None
         try:
             fetcher = CourseFetcher(
-                username,
-                password,
+                self.username,
+                self.password,
                 headless=True,
-                browser_path=browser_path
+                browser_path=self.browser_path
             )
             courses = fetcher.fetch_timetable(week=week_num)
             
@@ -688,8 +712,9 @@ class WuyiKebiaoPlugin(Star):
             if fetcher:
                 fetcher.close()
 
-    @filter.command("今天有什么课")
+    @filter.command("今天课表")
     async def today_courses(self, event: AstrMessageEvent):
+        """查看今天课表（从缓存）"""
         if not self.courses:
             yield event.plain_result("📭 还没有课表数据，请先发送 \"更新课表\"")
             return
@@ -708,12 +733,6 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("明天课表")
     async def tomorrow_courses(self, event: AstrMessageEvent):
-        username, password, browser_path = self._get_credentials()
-        
-        if not username or not password:
-            yield event.plain_result("❌ 未配置学号或密码，请在插件配置中设置")
-            return
-            
         target_day, is_next_week, desc = self._get_relative_day_info(1)
         
         if is_next_week:
@@ -722,10 +741,10 @@ class WuyiKebiaoPlugin(Star):
             fetcher = None
             try:
                 fetcher = CourseFetcher(
-                    username,
-                    password,
+                    self.username,
+                    self.password,
                     headless=True,
-                    browser_path=browser_path
+                    browser_path=self.browser_path
                 )
                 courses = fetcher.fetch_timetable(week="next")
                 
@@ -756,12 +775,6 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("后天课表")
     async def day_after_tomorrow_courses(self, event: AstrMessageEvent):
-        username, password, browser_path = self._get_credentials()
-        
-        if not username or not password:
-            yield event.plain_result("❌ 未配置学号或密码，请在插件配置中设置")
-            return
-            
         target_day, is_next_week, desc = self._get_relative_day_info(2)
         
         if is_next_week:
@@ -770,10 +783,10 @@ class WuyiKebiaoPlugin(Star):
             fetcher = None
             try:
                 fetcher = CourseFetcher(
-                    username,
-                    password,
+                    self.username,
+                    self.password,
                     headless=True,
-                    browser_path=browser_path
+                    browser_path=self.browser_path
                 )
                 courses = fetcher.fetch_timetable(week="next")
                 
@@ -832,16 +845,9 @@ if __name__ == "__main__":
         print("❌ 缺少 BeautifulSoup4: pip install beautifulsoup4")
         exit(1)
     
-    TEST_USERNAME = os.environ.get("WUYI_USERNAME", "")
-    TEST_PASSWORD = os.environ.get("WUYI_PASSWORD", "")
+    TEST_USERNAME = "20251481201"
+    TEST_PASSWORD = "HorizonUI128.com"
     TEST_HEADLESS = False
-    
-    if not TEST_USERNAME or not TEST_PASSWORD:
-        print("\n⚠️  请设置环境变量 WUYI_USERNAME 和 WUYI_PASSWORD")
-        print("示例：set WUYI_USERNAME=20251481201")
-        print("      set WUYI_PASSWORD=你的密码")
-        input("\n按回车键退出...")
-        exit(1)
     
     print(f"\n[配置] 账号: {TEST_USERNAME}")
     print(f"[配置] 密码: {'*' * len(TEST_PASSWORD)}")
@@ -850,18 +856,14 @@ if __name__ == "__main__":
     
     class LocalTester(WuyiKebiaoPlugin):
         def __init__(self):
-            # 模拟 Context
-            class MockContext:
-                data_path = os.path.join(os.path.expanduser("~"), "Documents", "WuyiKebiao")
-            
-            # 构造 config 字典
-            config = {
-                "username": TEST_USERNAME,
-                "password": TEST_PASSWORD,
-                "browser_path": ""
-            }
-            
-            super().__init__(MockContext(), config)
+            self.username = TEST_USERNAME
+            self.password = TEST_PASSWORD
+            self.browser_path = None
+            self.data_dir = os.path.join(os.path.expanduser("~"), "Documents", "WuyiKebiao")
+            os.makedirs(self.data_dir, exist_ok=True)
+            self.json_file = os.path.join(self.data_dir, "courses.json")
+            self.courses = []
+            self._load_cache()
     
     plugin = LocalTester()
     
@@ -869,7 +871,7 @@ if __name__ == "__main__":
         while True:
             print("\n功能菜单:")
             print("1. 更新课表（当前周）")
-            print("2. 查看今天有什么课")
+            print("2. 查看今天课表")
             print("3. 查看明天课表（智能判断下周）")
             print("4. 查看后天课表（智能判断下周）")
             print("5. 查看下周课表")
