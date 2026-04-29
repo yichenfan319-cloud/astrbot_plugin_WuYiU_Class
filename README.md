@@ -80,17 +80,18 @@ apt install -y chromium chromium-driver
 
 3.配置插件:
 browser_path 为：/usr/bin/chromium
-
+```
 #### Windows 本地部署
-# Windows 环境下无需配置 browser_path，留空即可。插件会自动检测以下位置的 Chrome/Edge：
+```bash
+Windows 环境下无需配置 browser_path，留空即可。插件会自动检测以下位置的 Chrome/Edge：
 C:\Program Files\Google\Chrome\Application\chrome.exe
 C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
 用户目录下的 Chrome
-
-#### 故障排查
-# 提示"未配置学号或密码"
+```
+## 故障排查
+提示"未配置学号或密码"
 进入 AstrBot WebUI → 插件配置 → 武夷课表，填写账号密码后重启 AstrBot。
-# 提示"浏览器未找到"（Linux）
+提示"浏览器未找到"（Linux）
 确认 Chromium 已安装：which chromium
 Docker 用户确认是在容器内安装的 Chromium，而非宿主机
 检查 browser_path 配置是否正确
