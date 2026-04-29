@@ -89,6 +89,7 @@ C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
 用户目录下的 Chrome
 ```
 ## 故障排查
+
 提示"未配置学号或密码"
 进入 AstrBot WebUI → 插件配置 → 武夷课表，填写账号密码后重启 AstrBot。
 提示"浏览器未找到"（Linux）
