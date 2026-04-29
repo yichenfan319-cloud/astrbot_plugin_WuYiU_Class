@@ -90,21 +90,22 @@ C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
 ```
 ## 故障排查
 
-提示"未配置学号或密码"
+#### 1.提示"未配置学号或密码"
 进入 AstrBot WebUI → 插件配置 → 武夷课表，填写账号密码后重启 AstrBot。
-提示"浏览器未找到"（Linux）
+#### 2.提示"浏览器未找到"（Linux）
 确认 Chromium 已安装：which chromium
 Docker 用户确认是在容器内安装的 Chromium，而非宿主机
 检查 browser_path 配置是否正确
-登录失败
+#### 3.登录失败
 确认账号密码正确（注意大小写）
 确认账号可以正常登录 教务系统
 检查网络连接（服务器需能访问武夷学院内网/VPN）
-获取不到课表数据
+#### 4.获取不到课表数据
 确认当前时间处于学期内（非假期）
 尝试发送 更新课表 刷新缓存
 查看 AstrBot 日志获取详细错误信息
-技术说明
+
+## 技术说明
 基于 DrissionPage 实现无头浏览器自动化
 使用 BeautifulSoup4 解析 HTML
 缓存文件存储在 data/wuyi-kebiao/courses.json
