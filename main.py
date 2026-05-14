@@ -157,7 +157,7 @@ class CourseFetcher:
     def fetch_timetable(self, week: Union[int, str, None] = None) -> List[Course]:
         try:
             logger.info("[流程] 访问登录页...")
-            self.page.get("https://sso.wuyiu.edu.cn/linkid/5")
+            self.page.get("http://jwxt.wuyiu.edu.cn/jsxsd/")
             time.sleep(3)
             
             inputs = self.page.eles("tag:input")
