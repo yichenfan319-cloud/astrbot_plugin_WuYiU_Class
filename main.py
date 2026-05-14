@@ -509,16 +509,32 @@ class WuyiKebiaoPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         
-        self.username = ""
-        self.password = ""
-        self.browser_path = "/usr/bin/chromium"
+        # 从AstrBot配置中读取账号密码（支持WebUI配置）
+        self.username = self._get_config("username", "")
+        self.password = self._get_config("password", "")
+        self.browser_path = self._get_config("browser_path", "")
         
+        # 验证配置完整性
+        if not self.username:
+            logger.warning("[配置] 未在WebUI配置学号，请到插件配置页面填写 username")
+        if not self.password:
+            logger.warning("[配置] 未在WebUI配置密码，请到插件配置页面填写 password")
+        
+        # 设置浏览器路径默认值
+        if not self.browser_path:
+            if platform.system() == "Windows":
+                self.browser_path = None  # Windows自动检测
+            else:
+                self.browser_path = "/usr/bin/chromium"
+        
+        # 数据目录
         if hasattr(context, 'data_path'):
             self.data_dir = context.data_path
         else:
             self.data_dir = os.path.join(os.path.dirname(__file__), "data")
         os.makedirs(self.data_dir, exist_ok=True)
         
+        # 缓存文件
         self.json_file = os.path.join(self.data_dir, "courses.json")
         self.courses: List[Course] = []
         self._load_cache()
@@ -533,16 +549,48 @@ class WuyiKebiaoPlugin(Star):
         
         logger.info(f"[插件] 武夷学院课表插件已加载")
         logger.info(f"[插件] 数据目录: {self.data_dir}")
+        if self.username:
+            logger.info(f"[插件] 当前学号: {self.username[:4]}***")
+        else:
+            logger.warning("[插件] 学号未配置，请在WebUI中配置")
+    
+    def _get_config(self, key: str, default=None):
+        """从AstrBot配置中读取值"""
+        try:
+            # AstrBot的配置通常存储在context.config中
+            if hasattr(self.context, 'config'):
+                config = self.context.config
+                if isinstance(config, dict) and key in config:
+                    return config.get(key)
+                elif hasattr(config, 'get'):
+                    return config.get(key, default)
+            
+            # 尝试从context.plugin_config获取（AstrBot 3.x+）
+            if hasattr(self.context, 'plugin_config'):
+                return self.context.plugin_config.get(key, default)
+            
+            # 尝试从context.get_plugin_config方法获取
+            if hasattr(self.context, 'get_plugin_config'):
+                return self.context.get_plugin_config(key, default)
+            
+            # 备用方案：从本地配置文件读取（自动创建）
+            config_file = os.path.join(self.data_dir, "plugin_config.json")
+            if os.path.exists(config_file):
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    return config.get(key, default)
+                    
+        except Exception as e:
+            logger.warning(f"[配置] 读取 {key} 失败: {e}")
+        return default
     
     async def _daily_update_task(self):
         """后台定时任务：每天早上6点自动更新课表缓存"""
         while True:
             try:
                 now = datetime.now()
-                # 计算下一个早上6点
                 target = now.replace(hour=6, minute=0, second=0, microsecond=0)
                 if now >= target:
-                    # 如果已经过了6点，等到明天6点
                     target += timedelta(days=1)
                 
                 wait_seconds = (target - now).total_seconds()
@@ -550,18 +598,26 @@ class WuyiKebiaoPlugin(Star):
                 
                 await asyncio.sleep(wait_seconds)
                 
-                # 到达6点，执行更新
+                # 检查配置是否完整
+                if not self.username or not self.password:
+                    logger.warning("[定时任务] 账号或密码未配置，跳过自动更新")
+                    await asyncio.sleep(3600)  # 等待1小时后重试
+                    continue
+                
                 logger.info("[定时任务] 开始自动更新课表...")
                 await self._do_auto_update()
                 
             except Exception as e:
                 logger.error(f"[定时任务] 异常: {e}")
                 traceback.print_exc()
-                # 出错后等待10分钟再重试，避免死循环
                 await asyncio.sleep(600)
     
     async def _do_auto_update(self):
         """执行自动更新（静默，不发送消息）"""
+        if not self.username or not self.password:
+            logger.warning("[定时任务] 账号或密码未配置，无法自动更新")
+            return
+        
         fetcher = None
         try:
             fetcher = CourseFetcher(
@@ -615,9 +671,22 @@ class WuyiKebiaoPlugin(Star):
             desc += "（下周）"
         
         return target_day, is_next_week, desc
+    
+    def _check_config_and_yield(self, event) -> bool:
+        """检查配置是否完整"""
+        if not self.username or not self.password:
+            event.plain_result("❌ 请先在WebUI插件配置页面设置学号和密码！")
+            return False
+        return True
 
+    # ==================== 命令 ====================
+    
     @filter.command("更新课表")
     async def update_kebiao(self, event: AstrMessageEvent):
+        """获取当前周课表并缓存"""
+        if not self._check_config_and_yield(event):
+            return
+        
         yield event.plain_result("⏳ 正在登录教务系统获取当前周课表...")
         
         fetcher = None
@@ -649,6 +718,10 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("下周课表")
     async def next_week_courses(self, event: AstrMessageEvent):
+        """查询下周课表"""
+        if not self._check_config_and_yield(event):
+            return
+        
         yield event.plain_result("⏳ 正在查询下周课表...")
         
         fetcher = None
@@ -677,6 +750,10 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("第 {week} 周课表")
     async def specific_week(self, event: AstrMessageEvent, week: str):
+        """查询指定周课表"""
+        if not self._check_config_and_yield(event):
+            return
+        
         try:
             week_num = int(week)
             if week_num < 1 or week_num > 20:
@@ -733,9 +810,13 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("明天课表")
     async def tomorrow_courses(self, event: AstrMessageEvent):
+        """查看明天课表（自动判断是否需要查下周）"""
         target_day, is_next_week, desc = self._get_relative_day_info(1)
         
         if is_next_week:
+            if not self._check_config_and_yield(event):
+                return
+            
             yield event.plain_result(f"⏳ 正在查询明天（{target_day}，下周）的课表...")
             
             fetcher = None
@@ -775,9 +856,13 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("后天课表")
     async def day_after_tomorrow_courses(self, event: AstrMessageEvent):
+        """查看后天课表（自动判断是否需要查下周）"""
         target_day, is_next_week, desc = self._get_relative_day_info(2)
         
         if is_next_week:
+            if not self._check_config_and_yield(event):
+                return
+            
             yield event.plain_result(f"⏳ 正在查询后天（{target_day}，下周）的课表...")
             
             fetcher = None
@@ -817,103 +902,36 @@ class WuyiKebiaoPlugin(Star):
 
     @filter.command("本周课表")
     async def current_week_overview(self, event: AstrMessageEvent):
+        """查看本周完整课表"""
         if not self.courses:
             yield event.plain_result("📭 还没有课表数据，请先发送 \"更新课表\"")
             return
         
         result = format_week_by_day("本周", self.courses)
         yield event.plain_result(result)
+    
+    @filter.command("配置状态")
+    async def config_status(self, event: AstrMessageEvent):
+        """查看当前配置状态（用于调试）"""
+        status_lines = [
+            "📋 插件配置状态：",
+            f"• 学号: {'已配置 (' + self.username[:4] + '***)' if self.username else '❌ 未配置'}",
+            f"• 密码: {'✅ 已配置' if self.password else '❌ 未配置'}",
+            f"• 浏览器路径: {self.browser_path or '自动检测'}",
+            f"• 课表缓存: {len(self.courses)} 门课程",
+            "",
+            "💡 如需修改配置，请到 AstrBot WebUI 插件配置页面",
+            "💡 修改后发送「更新课表」重新获取数据"
+        ]
+        yield event.plain_result("\n".join(status_lines))
 
 
-# ==================== Windows 本地测试入口 ====================
+# ==================== 本地测试入口（调试用） ====================
 if __name__ == "__main__":
     print("="*60)
-    print("武夷学院课表插件 - Windows本地测试模式")
+    print("武夷学院课表插件 - 本地测试模式")
     print("="*60)
+    print("⚠️ 请先在代码中设置 TEST_USERNAME 和 TEST_PASSWORD")
     
     try:
-        from DrissionPage import __version__ as dp_version
-        print(f"✅ DrissionPage 已安装 (v{dp_version})")
-    except ImportError:
-        print("❌ 缺少 DrissionPage: pip install DrissionPage")
-        exit(1)
-    
-    try:
-        from bs4 import BeautifulSoup
-        print("✅ BeautifulSoup4 已安装")
-    except ImportError:
-        print("❌ 缺少 BeautifulSoup4: pip install beautifulsoup4")
-        exit(1)
-    
-    TEST_USERNAME = ""
-    TEST_PASSWORD = ""
-    TEST_HEADLESS = False
-    
-    print(f"\n[配置] 账号: {TEST_USERNAME}")
-    print(f"[配置] 密码: {'*' * len(TEST_PASSWORD)}")
-    print(f"[配置] 模式: {'无痕' if TEST_HEADLESS else '可视化（调试）'}")
-    print("-"*60)
-    
-    class LocalTester(WuyiKebiaoPlugin):
-        def __init__(self):
-            self.username = TEST_USERNAME
-            self.password = TEST_PASSWORD
-            self.browser_path = None
-            self.data_dir = os.path.join(os.path.expanduser("~"), "Documents", "WuyiKebiao")
-            os.makedirs(self.data_dir, exist_ok=True)
-            self.json_file = os.path.join(self.data_dir, "courses.json")
-            self.courses = []
-            self._load_cache()
-    
-    plugin = LocalTester()
-    
-    async def interactive_menu():
-        while True:
-            print("\n功能菜单:")
-            print("1. 更新课表（当前周）")
-            print("2. 查看今天课表")
-            print("3. 查看明天课表（智能判断下周）")
-            print("4. 查看后天课表（智能判断下周）")
-            print("5. 查看下周课表")
-            print("6. 查看指定周课表(1-20)")
-            print("7. 查看本周课表概览")
-            print("0. 退出")
-            
-            choice = input("\n请选择: ").strip()
-            
-            class MockEvent:
-                async def plain_result(self, text):
-                    print(f"\n{'='*50}\n{text}\n{'='*50}\n")
-            
-            async def run_cmd(cmd_func, *args):
-                async for msg in cmd_func(MockEvent(), *args):
-                    pass
-            
-            import asyncio
-            
-            if choice == "1":
-                await run_cmd(plugin.update_kebiao)
-            elif choice == "2":
-                await run_cmd(plugin.today_courses)
-            elif choice == "3":
-                await run_cmd(plugin.tomorrow_courses)
-            elif choice == "4":
-                await run_cmd(plugin.day_after_tomorrow_courses)
-            elif choice == "5":
-                await run_cmd(plugin.next_week_courses)
-            elif choice == "6":
-                week = input("请输入周次(1-20): ").strip()
-                try:
-                    await run_cmd(plugin.specific_week, week)
-                except ValueError:
-                    print("❌ 请输入数字")
-            elif choice == "7":
-                await run_cmd(plugin.current_week_overview)
-            elif choice == "0":
-                print("退出")
-                break
-            else:
-                print("无效选项")
-    
-    import asyncio
-    asyncio.run(interactive_menu())
+        from DrissionPage import __
