@@ -509,8 +509,8 @@ class WuyiKebiaoPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         
-        self.username = "20251481201"
-        self.password = "HorizonUI128.com"
+        self.username = ""
+        self.password = ""
         self.browser_path = "/usr/bin/chromium"
         
         if hasattr(context, 'data_path'):
@@ -845,8 +845,8 @@ if __name__ == "__main__":
         print("❌ 缺少 BeautifulSoup4: pip install beautifulsoup4")
         exit(1)
     
-    TEST_USERNAME = "20251481201"
-    TEST_PASSWORD = "HorizonUI128.com"
+    TEST_USERNAME = ""
+    TEST_PASSWORD = ""
     TEST_HEADLESS = False
     
     print(f"\n[配置] 账号: {TEST_USERNAME}")
